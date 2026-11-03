@@ -1,16 +1,62 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 import streamlit as st
 
-from songposter.art_director import create_demo_brief
-from songposter.charts import load_tracks
-from songposter.image_engine import create_demo_artwork
-from songposter.limits import BRIEF_LIMIT, POSTER_LIMIT
-from songposter.models import ArtBrief
-from songposter.overlay import add_title_overlay
+# Find the package whether the project files are at the repository root or one
+# folder below it. This avoids ModuleNotFoundError when an extracted project
+# folder is accidentally uploaded as a nested directory on GitHub.
+APP_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = None
+_search_roots = [APP_DIR]
+try:
+    _search_roots.extend(
+        item for item in APP_DIR.iterdir()
+        if item.is_dir() and not item.name.startswith(".")
+    )
+except OSError:
+    pass
 
-ROOT = Path(__file__).parent
+for _candidate in _search_roots:
+    if (_candidate / "songposter" / "__init__.py").is_file():
+        PROJECT_ROOT = _candidate
+        if str(_candidate) not in sys.path:
+            sys.path.insert(0, str(_candidate))
+        break
+
+if PROJECT_ROOT is None:
+    st.set_page_config(page_title="Song Poster Studio", page_icon="🎧")
+    st.title("🎧 Song Poster Studio")
+    st.error("The application package folder is missing. Please upload the complete project files to GitHub.")
+    st.markdown("The repository must contain `streamlit_app.py`, `requirements.txt`, and the `songposter/` folder.")
+    st.code(
+        "Lyric2Poster/\n"
+        "├── streamlit_app.py\n"
+        "├── requirements.txt\n"
+        "├── songposter/\n"
+        "│   ├── __init__.py\n"
+        "│   ├── art_director.py\n"
+        "│   └── ...\n"
+        "└── data/"
+    )
+    st.stop()
+
+ROOT = PROJECT_ROOT
+
+try:
+    from songposter.art_director import create_demo_brief
+    from songposter.charts import load_tracks
+    from songposter.image_engine import create_demo_artwork
+    from songposter.limits import BRIEF_LIMIT, POSTER_LIMIT
+    from songposter.models import ArtBrief
+    from songposter.overlay import add_title_overlay
+except ModuleNotFoundError as exc:
+    st.set_page_config(page_title="Song Poster Studio", page_icon="🎧")
+    st.title("🎧 Song Poster Studio")
+    st.error(f"A required application module is missing: {exc.name}")
+    st.info("Check that all files inside the songposter/ folder were uploaded to the repository.")
+    st.stop()
 
 st.set_page_config(
     page_title="Song Poster Studio",

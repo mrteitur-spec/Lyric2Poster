@@ -64,10 +64,16 @@ No automated chart collector is included. No Last.fm data is fetched.
 
 ## Deploy on Streamlit Community Cloud
 
-1. Push this folder to a GitHub repository you control.
-2. In Streamlit Community Cloud, choose **Create app**.
-3. Select your repository, branch, and `streamlit_app.py` as the main file.
-4. Deploy. No secrets are required for demo mode.
+1. Push the **contents** of this project folder to the root of a GitHub repository.
+   Do not upload only the ZIP archive.
+2. Confirm that `streamlit_app.py`, `requirements.txt`, and the `songposter/`
+   folder appear together at the repository root.
+3. In Streamlit Community Cloud, choose **Create app**.
+4. Select your repository, branch, and `streamlit_app.py` as the main file.
+5. Deploy. No secrets are required for demo mode.
+
+See [`DEPLOYMENT_FIX.md`](DEPLOYMENT_FIX.md) for troubleshooting the
+`ModuleNotFoundError: No module named 'songposter'` error.
 
 ## Project structure
 
