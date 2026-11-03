@@ -1,1 +1,1 @@
-# Lyric2Poster package
+"""Song Poster Studio application package."""
