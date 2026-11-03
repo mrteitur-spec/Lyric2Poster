@@ -45,18 +45,22 @@ if PROJECT_ROOT is None:
 ROOT = PROJECT_ROOT
 
 try:
-    from songposter.art_director import create_demo_brief
-    from songposter.charts import load_tracks
-    from songposter.image_engine import create_demo_artwork
+    from songposter.art_director import MOODS, create_brief_for_song, create_demo_brief
+    from songposter.catalog import filter_songs, genres, load_catalog
     from songposter.limits import BRIEF_LIMIT, POSTER_LIMIT
     from songposter.models import ArtBrief
     from songposter.overlay import add_title_overlay
+    from songposter.scene_engine import create_scene_artwork
+    from songposter.styles import MATCH_SONG, STYLE_PRESETS
 except ModuleNotFoundError as exc:
     st.set_page_config(page_title="Song Poster Studio", page_icon="🎧")
     st.title("🎧 Song Poster Studio")
     st.error(f"A required application module is missing: {exc.name}")
     st.info("Check that all files inside the songposter/ folder were uploaded to the repository.")
     st.stop()
+
+import random
+from io import BytesIO
 
 st.set_page_config(
     page_title="Song Poster Studio",
@@ -65,202 +69,232 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+SOURCE_POPULAR, SOURCE_CUSTOM = "Popular songs", "My own song"
+AUTO_MOOD = "Auto (from lyrics)"
+
+
+@st.cache_data(show_spinner=False)
+def get_catalog():
+    return load_catalog()
+
+
+@st.cache_data(show_spinner=False, max_entries=16)
+def render_poster(brief: dict, title: str, artist: str, tagline: str, position: str) -> bytes:
+    """Draw artwork + typography. Cached, so toggling title position is instant."""
+    art = ArtBrief.from_dict(brief)
+    background = create_scene_artwork(art, size=(900, 1350))
+    poster = add_title_overlay(
+        background, title=title, artist=artist, style=art.style,
+        palette=art.palette, tagline=tagline, position=position.lower(),
+    )
+    buffer = BytesIO()
+    poster.save(buffer, format="PNG", optimize=True)
+    return buffer.getvalue()
+
+
+CATALOG = get_catalog()
+BY_LABEL = {song.label: song for song in CATALOG}
+
 
 def initialize_state() -> None:
     defaults = {
-        "brief_count": 0,
-        "poster_count": 0,
-        "art_brief": None,
-        "poster_png": None,
-        "app_error": None,
-        "chart_choice": "Custom song",
-        "song_title": "",
-        "artist_name": "",
-        "poster_style": "Aurora",
+        "brief_count": 0, "poster_count": 0, "art_brief": None, "poster_meta": None,
+        "app_error": None, "source": SOURCE_POPULAR, "genre_filter": "All", "song_query": "",
+        "song_choice": None, "poster_look": MATCH_SONG, "title_position": "Bottom",
+        "custom_title": "", "custom_artist": "", "custom_mood": AUTO_MOOD,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
 
 
-def selected_track_changed(track_map: dict[str, dict[str, str]]) -> None:
-    choice = st.session_state.get("chart_choice", "Custom song")
-    track = track_map.get(choice)
-    if track:
-        st.session_state["song_title"] = track["title"]
-        st.session_state["artist_name"] = track["artist"]
+def clear_poster() -> None:
     st.session_state["art_brief"] = None
-    st.session_state["poster_png"] = None
+    st.session_state["poster_meta"] = None
+    st.session_state["app_error"] = None
 
 
-def create_brief_callback() -> None:
-    """Consume lyrics in this callback, retain only the lyric-free brief."""
-    lyrics = st.session_state.get("lyrics_input", "")
-    title = st.session_state.get("song_title", "").strip()
-    artist = st.session_state.get("artist_name", "").strip()
-    style = st.session_state.get("poster_style", "Aurora")
+def surprise_me() -> None:
+    pool = filter_songs(CATALOG, st.session_state.get("genre_filter", "All"), st.session_state.get("song_query", ""))
+    if pool:
+        st.session_state["song_choice"] = random.choice(pool).label
+        clear_poster()
 
+
+def request_poster() -> None:
+    """Build the lyric-free brief (consuming any lyrics), then store it for rendering."""
+    ss = st.session_state
+    look = ss.get("poster_look", MATCH_SONG)
     try:
-        if st.session_state.get("brief_count", 0) >= BRIEF_LIMIT:
-            st.session_state["app_error"] = f"Session limit reached ({BRIEF_LIMIT} briefs)."
-        elif not title or not artist:
-            st.session_state["app_error"] = "Please enter both a song title and an artist."
-        elif not lyrics.strip():
-            st.session_state["app_error"] = "Please enter some lyrics to create an art brief."
+        if ss.get("poster_count", 0) >= POSTER_LIMIT or ss.get("brief_count", 0) >= BRIEF_LIMIT:
+            ss["app_error"] = f"Session limit reached ({POSTER_LIMIT} posters). Refresh the page to start a new session."
+            return
+        if ss.get("source") == SOURCE_POPULAR:
+            song = BY_LABEL.get(ss.get("song_choice") or "")
+            if song is None:
+                ss["app_error"] = "Please choose a song first."
+                return
+            brief = create_brief_for_song(song, style=look)
+            meta = {"title": song.title, "artist": song.artist, "tagline": song.tagline}
         else:
-            brief = create_demo_brief(title=title, artist=artist, lyrics=lyrics, style=style)
-            st.session_state["art_brief"] = brief.to_dict()
-            st.session_state["poster_png"] = None
-            st.session_state["brief_count"] = st.session_state.get("brief_count", 0) + 1
-            st.session_state["app_error"] = None
+            title, artist = ss.get("custom_title", "").strip(), ss.get("custom_artist", "").strip()
+            mood = ss.get("custom_mood", AUTO_MOOD)
+            lyrics = ss.get("lyrics_input", "")
+            if not title or not artist:
+                ss["app_error"] = "Please enter both a song title and an artist."
+                return
+            if not lyrics.strip() and mood == AUTO_MOOD:
+                ss["app_error"] = "Paste a short lyric excerpt you may use, or pick a mood."
+                return
+            brief = create_demo_brief(title=title, artist=artist, lyrics=lyrics, style=look,
+                                      mood=None if mood == AUTO_MOOD else mood)
+            meta = {"title": title, "artist": artist, "tagline": ""}
+        meta["variation"] = 0
+        meta["base_seed"] = brief.seed
+        ss["art_brief"], ss["poster_meta"] = brief.to_dict(), meta
+        ss["brief_count"] = ss.get("brief_count", 0) + 1
+        ss["poster_count"] = ss.get("poster_count", 0) + 1
+        ss["app_error"] = None
     except Exception as exc:  # Do not include user input in error text.
-        st.session_state["app_error"] = f"Could not create the brief ({type(exc).__name__})."
+        ss["app_error"] = f"Could not create the poster ({type(exc).__name__})."
     finally:
-        # The lyrics widget value is removed before the next page render.
-        st.session_state.pop("lyrics_input", None)
+        ss.pop("lyrics_input", None)  # lyrics never outlive this callback
+
+
+def new_variation() -> None:
+    ss = st.session_state
+    if not ss.get("art_brief") or ss.get("poster_count", 0) >= POSTER_LIMIT:
+        return
+    meta = dict(ss["poster_meta"])
+    meta["variation"] = meta.get("variation", 0) + 1
+    brief = dict(ss["art_brief"])
+    brief["seed"] = f"{meta['base_seed']}#{meta['variation']}"
+    ss["art_brief"], ss["poster_meta"] = brief, meta
+    ss["poster_count"] = ss.get("poster_count", 0) + 1
+
+
+def swatches(colors) -> None:
+    cols = st.columns(len(colors))
+    for col, color in zip(cols, colors):
+        col.markdown(
+            f"<div style='height:30px;border-radius:8px;background:{color};border:1px solid #777'></div>"
+            f"<div style='text-align:center;font-size:0.72rem;opacity:.8'>{color}</div>",
+            unsafe_allow_html=True,
+        )
 
 
 initialize_state()
 
 st.title("🎧 Song Poster Studio")
-st.caption("Turn a song's mood into an abstract poster. A local demo build with no API keys required.")
+st.caption("Pick a hit, get a poster that looks and feels like the song. Drawn locally, no API keys needed.")
 
 with st.sidebar:
     st.header("Studio settings")
     st.selectbox(
-        "Poster style",
-        ["Aurora", "Minimal", "Retro", "Noir", "Dreamscape", "Geometric"],
-        key="poster_style",
-        help="Choose the visual direction for your poster.",
+        "Poster look", [MATCH_SONG, *STYLE_PRESETS], key="poster_look",
+        help="“Match the song” uses each song's own colours and style. Applies to the next poster you create.",
     )
-    st.divider()
-    st.markdown("**Engine status**")
-    st.success("Demo mode · local Pillow artwork")
-    st.caption("This starter build does not call Claude, FLUX, or any external API.")
+    st.radio("Title position", ["Bottom", "Top"], key="title_position", horizontal=True)
     st.divider()
     st.markdown("**Session usage**")
-    st.metric("Art briefs", f"{st.session_state['brief_count']} / {BRIEF_LIMIT}")
     st.metric("Posters", f"{st.session_state['poster_count']} / {POSTER_LIMIT}")
     st.caption("Counters are held in this Streamlit session and reset with a new session.")
 
-tracks = load_tracks(ROOT / "data" / "charts")
-track_map = {f"{item['title']} — {item['artist']}": item for item in tracks}
-chart_options = ["Custom song", *track_map.keys()]
-if st.session_state.get("chart_choice") not in chart_options:
-    st.session_state["chart_choice"] = "Custom song"
+left, right = st.columns([1.0, 1.0], gap="large")
 
-left, right = st.columns([1.05, 0.95], gap="large")
 with left:
     st.subheader("1. Choose a song")
-    st.selectbox(
-        "Sample chart tracks",
-        chart_options,
-        key="chart_choice",
-        on_change=selected_track_changed,
-        kwargs={"track_map": track_map},
-        help="The included chart CSV is fictional sample data. You can also enter your own track.",
-    )
-    st.text_input("Song title", key="song_title", placeholder="Enter the song title")
-    st.text_input("Artist", key="artist_name", placeholder="Enter the artist name")
+    st.radio("Source", [SOURCE_POPULAR, SOURCE_CUSTOM], key="source", horizontal=True,
+             label_visibility="collapsed", on_change=clear_poster)
 
-    st.subheader("2. Add lyrics")
-    st.info("Lyrics are used only in-memory to create the art brief. This app does not write lyrics to files, logs, or a database.")
-    with st.form("brief_form", clear_on_submit=True):
-        st.text_area(
-            "Lyrics",
-            key="lyrics_input",
-            height=190,
-            placeholder="Paste a short excerpt you are permitted to use…",
-            help="Use text you own or are authorized to process. Lyrics are removed from session state after the brief is created.",
+    if st.session_state["source"] == SOURCE_POPULAR:
+        g_col, q_col = st.columns([0.4, 0.6])
+        g_col.selectbox("Genre", ["All", *genres(CATALOG)], key="genre_filter")
+        q_col.text_input("Search", key="song_query", placeholder="Title or artist…")
+        pool = filter_songs(CATALOG, st.session_state["genre_filter"], st.session_state["song_query"])
+        labels = [song.label for song in pool]
+        if st.session_state.get("song_choice") not in labels:
+            st.session_state["song_choice"] = None
+        st.selectbox(
+            f"Popular songs ({len(labels)})", labels, index=None, key="song_choice",
+            placeholder="Choose a song…", on_change=clear_poster,
         )
-        st.form_submit_button(
-            "Create art brief",
-            type="primary",
-            disabled=st.session_state["brief_count"] >= BRIEF_LIMIT,
-            on_click=create_brief_callback,
-            use_container_width=True,
+        st.button("🎲 Surprise me", on_click=surprise_me, disabled=not labels)
+
+        song = BY_LABEL.get(st.session_state.get("song_choice") or "")
+        if song:
+            with st.container(border=True):
+                st.markdown(f"### {song.title}")
+                st.markdown(f"**{song.artist}** · {song.genre}" + (f" · {song.year}" if song.year else ""))
+                st.write(f"*{song.mood.title()}* · {song.themes}")
+                st.caption("Scene: " + " + ".join(song.motifs))
+                swatches(song.palette)
+            if song.public_domain:
+                st.caption("Public-domain lyrics are built in for this song.")
+            else:
+                st.caption("No lyrics needed: this song's mood, themes and colours are already built in.")
+        st.button(
+            "Create poster", type="primary", width="stretch", on_click=request_poster,
+            disabled=song is None or st.session_state["poster_count"] >= POSTER_LIMIT,
         )
+    else:
+        st.info("Lyrics are used only in memory to choose the mood and scene, then discarded. "
+                "Only paste text you are allowed to use.")
+        with st.form("custom_form", clear_on_submit=False):
+            st.text_input("Song title", key="custom_title", placeholder="Enter the song title")
+            st.text_input("Artist", key="custom_artist", placeholder="Enter the artist name")
+            st.selectbox("Mood", [AUTO_MOOD, *MOODS], key="custom_mood")
+            st.text_area("Lyrics (optional if you pick a mood)", key="lyrics_input", height=150,
+                         placeholder="Paste a short excerpt you are permitted to use…")
+            st.form_submit_button(
+                "Create poster", type="primary", width="stretch", on_click=request_poster,
+                disabled=st.session_state["poster_count"] >= POSTER_LIMIT,
+            )
 
     if st.session_state.get("app_error"):
         st.error(st.session_state["app_error"])
 
 with right:
-    st.subheader("3. Your art direction")
-    raw_brief = st.session_state.get("art_brief")
-    if raw_brief:
-        brief = ArtBrief.from_dict(raw_brief)
-        st.markdown(f"### {brief.concept}")
-        st.write(brief.description)
-        st.markdown("**Mood**")
-        st.write(brief.mood)
-        st.markdown("**Visual elements**")
-        st.write(", ".join(brief.visual_elements))
-        st.markdown("**Palette**")
-        palette_cols = st.columns(len(brief.palette))
-        for col, color in zip(palette_cols, brief.palette):
-            col.markdown(
-                f"<div style='height:34px;border-radius:8px;background:{color};border:1px solid #777'></div>"
-                f"<div style='text-align:center;font-size:0.75rem'>{color}</div>",
-                unsafe_allow_html=True,
-            )
-        if st.button(
-            "Generate poster",
-            type="primary",
-            disabled=st.session_state["poster_count"] >= POSTER_LIMIT,
-            use_container_width=True,
-        ):
-            try:
-                background = create_demo_artwork(brief, size=(900, 1350))
-                poster = add_title_overlay(
-                    background,
-                    title=st.session_state.get("song_title", "Untitled"),
-                    artist=st.session_state.get("artist_name", "Unknown artist"),
-                    style=brief.style,
-                )
-                from io import BytesIO
-                buffer = BytesIO()
-                poster.save(buffer, format="PNG", optimize=True)
-                st.session_state["poster_png"] = buffer.getvalue()
-                st.session_state["poster_count"] = st.session_state.get("poster_count", 0) + 1
-                st.success("Poster created.")
-            except Exception as exc:
-                st.error(f"Could not generate poster ({type(exc).__name__}).")
+    st.subheader("2. Your poster")
+    raw_brief, meta = st.session_state.get("art_brief"), st.session_state.get("poster_meta")
+    if raw_brief and meta:
+        try:
+            with st.spinner("Painting your poster…"):
+                png = render_poster(raw_brief, meta["title"], meta["artist"], meta["tagline"],
+                                    st.session_state["title_position"])
+            st.image(png, width="stretch")
+            safe = "_".join(meta["title"].split()) or "poster"
+            safe = "".join(ch for ch in safe if ch.isalnum() or ch in "_-") or "poster"
+            d_col, v_col = st.columns(2)
+            d_col.download_button("Download PNG", data=png, file_name=f"{safe[:48]}_poster.png",
+                                  mime="image/png", type="primary", width="stretch")
+            v_col.button("🔄 New variation", on_click=new_variation, width="stretch",
+                         disabled=st.session_state["poster_count"] >= POSTER_LIMIT,
+                         help="Same song and colours, a different arrangement.")
+            with st.expander("Art direction"):
+                brief = ArtBrief.from_dict(raw_brief)
+                st.markdown(f"**{brief.concept}**")
+                st.write(brief.description)
+                st.caption("Scene: " + " + ".join(brief.scene_motifs) + f" · Style: {brief.style}")
+                swatches(brief.palette)
+        except Exception as exc:
+            st.error(f"Could not generate the poster ({type(exc).__name__}).")
     else:
-        st.caption("Your lyric-free art brief will appear here after you create it.")
         st.markdown(
-            "<div style='min-height:260px;border:1px dashed #777;border-radius:14px;display:flex;align-items:center;justify-content:center;color:#888'>Waiting for an art brief</div>",
+            "<div style='aspect-ratio:2/3;max-width:420px;border:1px dashed #777;border-radius:14px;"
+            "display:flex;align-items:center;justify-content:center;color:#888;text-align:center;padding:1rem'>"
+            "Pick a song and press <b>&nbsp;Create poster&nbsp;</b></div>",
             unsafe_allow_html=True,
         )
 
-poster_png = st.session_state.get("poster_png")
-if poster_png:
-    st.divider()
-    st.subheader("4. Poster preview")
-    preview_col, details_col = st.columns([0.58, 0.42], gap="large")
-    with preview_col:
-        st.image(poster_png, caption="Demo-generated abstract artwork", use_container_width=True)
-    with details_col:
-        st.markdown("### Your poster is ready")
-        st.write("The title and artist are rendered as real text on top of the abstract artwork.")
-        safe_name = "_".join((st.session_state.get("song_title", "poster").strip().split() or ["poster"]))
-        st.download_button(
-            "Download poster (PNG)",
-            data=poster_png,
-            file_name=f"{safe_name[:48]}_poster.png",
-            mime="image/png",
-            type="primary",
-            use_container_width=True,
-        )
-
 st.divider()
-with st.expander("Privacy and demo limitations"):
+with st.expander("About this app"):
     st.markdown(
         """
-        - Lyrics are not included in the art-brief data structure and are not written to disk or a database by this app.
-        - The lyrics input is removed from Streamlit session state after brief creation. The hosting platform and browser still control their own transport/runtime behavior; do not paste confidential material.
-        - The included art director is a deterministic demo, not Claude. The image engine draws abstract artwork locally with Pillow, not FLUX.
-        - The sample chart data is fictional. No Last.fm collection, GitHub scheduled workflow, Hugging Face mirror, or remote GPU server is configured.
+        - Song moods, themes and colours are descriptive notes written for this app. Copyrighted lyrics are not included.
+        - Artwork is generated locally with Pillow; the title and artist are real text drawn on top.
+        - Custom lyrics are read once to choose a mood and scene, then removed from session state.
+        - Poster counters are per browser session.
         """
     )
-
 st.caption("Song Poster Studio · independent demo implementation")

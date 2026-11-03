@@ -1,2 +1,4 @@
-BRIEF_LIMIT = 10
-POSTER_LIMIT = 6
+# Per-session guards. Posters are drawn locally (no paid API), so these are
+# generous; they only stop one browser session from hogging shared CPU.
+BRIEF_LIMIT = 20
+POSTER_LIMIT = 20

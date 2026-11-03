@@ -1,30 +1,38 @@
 # Song Poster Studio
 
-A small Streamlit application that turns the mood of a song lyric excerpt into an abstract poster. It includes a fully local demo path, six poster styles, a fictional sample chart, PNG export, and tests.
+Pick a popular song and get a poster that looks and feels like it: song-specific artwork,
+the song's own colours, and a big, obvious title and artist. Everything is drawn locally with
+Pillow, so no API keys are needed.
 
-> **What this is:** an independent demo implementation based on the feature specification provided for this project. It is not a copy of the source code in the linked third-party repository. It does not claim to implement the original project's live Claude, FLUX, Last.fm, Hugging Face, or Colab integrations.
+## What's new in v2
+
+- **Popular-song picker**: 41 songs across Pop, Rock, K-Pop, Hip-Hop/R&B and Traditional.
+  Filter by genre, search by title or artist, or press *Surprise me*. Choosing a song fills in the
+  title, artist, mood, themes and colours automatically; no typing and no lyrics needed.
+- **Artwork that matches the song**: 19 scene motifs (neon skyline, retro sun, rain, flowers,
+  flames, road, vinyl, spotlight, fireworks, ...). Each song has a hero motif plus a supporting one,
+  its own palette, and its own seed, so every poster is different but repeatable.
+- **Bold typography**: large title that auto-fits up to 3 lines, wide-tracked artist name with an
+  accent bar, small genre/year tagline, soft shadow and a dark gradient for legibility. Fonts are
+  bundled (Anton, Bebas Neue, DM Serif Display, Poppins; SIL Open Font License) and chosen by style.
+  Korean/CJK titles work. Title can sit at the **bottom or top**.
+- **New variation** button, one-click **Create poster**, PNG download.
+- "My own song" mode still works: paste lyrics (used once, then discarded) or just pick a mood.
+
+## Lyrics and copyright
+
+The catalog holds *descriptive* notes written for this app (mood, themes, colours), not lyrics of
+copyrighted songs. Only public-domain songs (e.g. *Amazing Grace*) carry their lyrics. To make a
+poster for any song you have a right to use, use **My own song** and paste your own excerpt.
 
 ## Run locally
 
-Python 3.10 or newer is recommended.
-
 ```bash
 python -m venv .venv
-```
-
-Activate the environment:
-
-- macOS/Linux: `source .venv/bin/activate`
-- Windows PowerShell: `.venv\Scripts\Activate.ps1`
-
-Install and launch:
-
-```bash
+source .venv/bin/activate          # Windows: .venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
 streamlit run streamlit_app.py
 ```
-
-Open the local URL printed by Streamlit (usually <http://localhost:8501>).
 
 ## Run tests
 
@@ -33,71 +41,49 @@ python -m pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
-## Features included
+## Add or edit songs
 
-- Song selection from CSV files in `data/charts/`, plus custom title and artist input.
-- Six visual presets: Aurora, Minimal, Retro, Noir, Dreamscape, and Geometric.
-- Deterministic local art direction that returns a lyric-free `ArtBrief`.
-- Abstract background artwork rendered locally with Pillow.
-- Song title and artist overlaid as real text, with PNG download.
-- Demo mode works without API keys or network calls.
-- Session-only usage counters (10 briefs and 6 posters).
-- A test checks that a unique lyric canary is not present in the generated art brief.
-- GitHub Actions runs the test suite on pushes and pull requests.
+Open `data/catalog/popular_songs.json` and add an entry:
 
-## Privacy behavior and limitations
-
-The app does not intentionally write lyric text to files, logs, or a database. The lyric value is read by the form-submit callback, passed to the local art-director function, and removed from Streamlit session state before the next page render. The returned brief contains mood and visual direction only, not lyric text.
-
-This is not a guarantee about the hosting provider's transport, memory, backups, or operational logs. Avoid entering confidential or sensitive text.
-
-## Sample chart data
-
-`data/charts/sample_chart.csv` contains fictional example tracks. Add your own CSV files to `data/charts/` with at least these column names:
-
-```csv
-title,artist
-Example Song,Example Artist
+```json
+{
+  "id": "my-song", "title": "My Song", "artist": "My Artist", "year": 2024, "genre": "Pop",
+  "mood": "hopeful", "style": "Retro",
+  "motifs": ["sun", "clouds"],
+  "palette": ["#2B1236", "#C8503C", "#F4A94E", "#FBE3B0"],
+  "themes": "a short description in your own words"
+}
 ```
 
-No automated chart collector is included. No Last.fm data is fetched.
+- `motifs`: first = hero, second = supporting. Choose from: sun, moon, stars, skyline, waves, rain,
+  mountains, flowers, flames, road, vinyl, grid, ribbons, heart, spotlight, lightning, bubbles,
+  clouds, fireworks.
+- `palette`: four `#RRGGBB` colours (the engine sorts them dark to light).
+- `style`: Aurora, Minimal, Retro, Noir, Dreamscape or Geometric (controls the font pairing).
+- Invalid entries are skipped, never fatal.
 
 ## Deploy on Streamlit Community Cloud
 
-1. Push the **contents** of this project folder to the root of a GitHub repository.
-   Do not upload only the ZIP archive.
-2. Confirm that `streamlit_app.py`, `requirements.txt`, and the `songposter/`
-   folder appear together at the repository root.
-3. In Streamlit Community Cloud, choose **Create app**.
-4. Select your repository, branch, and `streamlit_app.py` as the main file.
-5. Deploy. No secrets are required for demo mode.
+1. Push the **contents** of this folder to the root of your GitHub repository.
+2. Confirm `streamlit_app.py`, `requirements.txt`, `packages.txt`, `assets/`, `data/` and `songposter/`
+   sit together at the repository root.
+3. Deploy (main file: `streamlit_app.py`) or reboot the existing app. No secrets are required.
+4. `packages.txt` installs a Korean font (`fonts-nanum`) so Hangul titles render correctly.
 
-See [`DEPLOYMENT_FIX.md`](DEPLOYMENT_FIX.md) for troubleshooting the
-`ModuleNotFoundError: No module named 'songposter'` error.
+If you ever see `ModuleNotFoundError: No module named 'songposter'`, see `DEPLOYMENT_FIX.md`.
 
 ## Project structure
 
 ```text
-song-poster-studio/
-├── streamlit_app.py
-├── songposter/
-│   ├── art_director.py
-│   ├── charts.py
-│   ├── image_engine.py
-│   ├── limits.py
-│   ├── models.py
-│   ├── overlay.py
-│   ├── safety.py
-│   └── styles.py
-├── data/charts/sample_chart.csv
-├── tests/test_core.py
-├── .github/workflows/ci.yml
-├── .streamlit/config.toml
-├── requirements.txt
-├── requirements-dev.txt
-└── pyproject.toml
+streamlit_app.py            app UI
+packages.txt                system fonts for Korean/CJK titles
+assets/fonts/               bundled open-licence fonts
+data/catalog/popular_songs.json   song catalog (edit me)
+songposter/
+  catalog.py                load/filter the catalog
+  art_director.py           moods, scene picking, art briefs
+  scene_engine.py           song-specific artwork (19 motifs)
+  overlay.py                title/artist typography
+  styles.py, models.py, safety.py, limits.py, charts.py, image_engine.py
+tests/                      42 tests
 ```
-
-## Before adding real AI services
-
-Live Claude and FLUX integrations are intentionally not included in this starter. Add them only after reviewing their current API documentation, supported model IDs, pricing, terms, and request schemas. Keep keys in Streamlit secrets or environment variables; never commit them to GitHub. Retain this demo fallback so the app remains usable when keys or external engines are unavailable.
